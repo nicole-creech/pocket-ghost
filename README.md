@@ -1,59 +1,49 @@
-# Pocket Ghost
+# 👻 Pocket Ghost
 
-Pocket Ghost is a cozy interactive companion app featuring Wisp, a tiny ghost who floats, reacts, follows your cursor with her eyes, and responds to your interactions.
+Pocket Ghost is a cozy, character-driven productivity companion featuring **Wisp**, a tiny ghost who floats beside you while you code, keeps you company, and helps you stay focused.
 
-Built as a playful frontend project, Pocket Ghost focuses on animation, personality-driven UI, and reusable interaction systems instead of traditional dashboard-style interfaces.
+Now available as a **VS Code extension** ✨
 
-## Features
+---
 
-- Interactive ghost companion character
-- Cursor-following eye tracking
-- Idle floating and swaying animation
-- Blink animation for a more lifelike feel
-- Pet, feed, and play interactions
-- Reaction effects like hearts and sparkles
+## ✨ Features
+
+### 👻 Companion Experience
+- Interactive ghost companion (Wisp)
+- Idle floating animation with subtle movement
+- Blinking and ambient eye movement
+- Personality-driven dialogue
+- Renameable companion
+
+### 🎮 Interactions
+- Pet, feed, and play actions
 - Happiness and energy tracking
-- Persistent state with local storage
-- Random personality-based dialogue
-- Renameable pet companion
+- Dynamic reactions and responses
 
-## Tech Stack
+### ⏱️ Focus Mode
+- Built-in focus timer (Pomodoro-style)
+- Start, pause, resume, and complete sessions
+- Tracks:
+  - Focus minutes
+  - Session count
+  - Streaks
 
-- Next.js
-- TypeScript
-- Tailwind CSS
-- Framer Motion
+### 🧠 Smart UI Behavior
+- Responsive sidebar layout for VS Code
+- Automatic **compact mode** for narrow sidebars
+- Static fallback ghost for stability at small sizes
+- Persistent state across sessions
 
-## Why I Built This
+---
 
-I wanted to build something that felt memorable, expressive, and technically polished while still being fun.
+## 🧩 VS Code Extension
 
-A lot of portfolio projects show data-heavy enterprise patterns. Pocket Ghost is intentionally different: it demonstrates component architecture, animation systems, interaction design, state management, and product thinking through a character-driven experience.
+Pocket Ghost lives in your **Explorer sidebar** as a lightweight companion while you code.
 
-## Current Character Behaviors
+### Install locally
 
-Wisp currently supports:
-
-- idle floating
-- side-to-side sway
-- cursor-following pupils
-- blinking
-- interaction reactions
-- mood-based status tracking
-
-## Planned Features
-
-- Additional ghost expressions and moods
-- Sleepy / happy / excited visual variants
-- Accessories and unlockables
-- More companion dialogue and personality states
-- Additional pet choices
-- VS Code extension version of Wisp
-
-## Running Locally
-
-Clone the repository and install dependencies:
+1. Package the extension:
 
 ```bash
-npm install
-npm run dev
+cd vscode-extension
+npx vsce package
