@@ -4,6 +4,7 @@
   "description": "A tiny spectral coding companion for focus sessions and gentle morale support.",
   "version": "0.1.0",
   "publisher": "nicole-creech",
+  "icon": "media/pocket-ghost-icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/nicole-creech/pocket-ghost"
