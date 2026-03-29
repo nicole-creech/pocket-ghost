@@ -15,6 +15,7 @@ type GhostPetProps = {
   energy?: number;
   reaction?: string | null;
   focusMode?: boolean;
+  focusPaused?: boolean;
 };
 
 type AmbientEmote = "sparkle" | "heart" | "dotdotdot" | "star" | null;
@@ -43,6 +44,7 @@ export default function GhostPet({
   energy,
   reaction,
   focusMode = false,
+  focusPaused = false,
 }: GhostPetProps) {
   const src = getGhostImage(mood);
 
@@ -50,6 +52,7 @@ export default function GhostPet({
 
   const isSleepy = currentEnergy < 35;
   const showSleepZs = currentEnergy <= 20 && !reaction && !focusMode;
+  const isLockedIn = focusMode && !focusPaused;
 
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
@@ -90,10 +93,15 @@ export default function GhostPet({
         const inactiveForMs = Date.now() - lastMouseMoveAtRef.current;
 
         if (inactiveForMs >= 1800) {
-          mouseX.set(randomBetween(-0.45, 0.45));
-          mouseY.set(
-            isSleepy ? randomBetween(0.1, 0.35) : randomBetween(-0.2, 0.35)
-          );
+          if (isLockedIn) {
+            mouseX.set(randomBetween(-0.18, 0.18));
+            mouseY.set(randomBetween(0.02, 0.18));
+          } else {
+            mouseX.set(randomBetween(-0.45, 0.45));
+            mouseY.set(
+              isSleepy ? randomBetween(0.1, 0.35) : randomBetween(-0.2, 0.35)
+            );
+          }
         }
 
         scheduleAmbientLook();
@@ -107,14 +115,14 @@ export default function GhostPet({
         clearTimeout(ambientLookTimeoutRef.current);
       }
     };
-  }, [mouseX, mouseY, isSleepy]);
+  }, [mouseX, mouseY, isSleepy, isLockedIn]);
 
   useEffect(() => {
     const scheduleAmbientEmote = () => {
       const delay = randomInt(9000, 17000);
 
       ambientEmoteTimeoutRef.current = setTimeout(() => {
-        if (!reaction && !showSleepZs) {
+        if (!reaction && !showSleepZs && !isLockedIn) {
           const nextEmote = pickAmbientEmote();
           setAmbientEmote(nextEmote);
 
@@ -138,12 +146,14 @@ export default function GhostPet({
         clearTimeout(ambientEmoteClearTimeoutRef.current);
       }
     };
-  }, [reaction, showSleepZs]);
+  }, [reaction, showSleepZs, isLockedIn]);
 
   useEffect(() => {
     const scheduleBlink = () => {
       const delay = isSleepy
         ? randomInt(2600, 4200)
+        : isLockedIn
+        ? randomInt(3200, 5200)
         : focusMode
         ? randomInt(2200, 3600)
         : randomInt(2800, 5200);
@@ -154,7 +164,7 @@ export default function GhostPet({
         blinkCloseTimeoutRef.current = setTimeout(() => {
           setIsBlinking(false);
           scheduleBlink();
-        }, isSleepy ? 180 : 140);
+        }, isSleepy ? 180 : isLockedIn ? 110 : 140);
       }, delay);
     };
 
@@ -169,39 +179,33 @@ export default function GhostPet({
         clearTimeout(blinkCloseTimeoutRef.current);
       }
     };
-  }, [isSleepy, focusMode]);
+  }, [isSleepy, focusMode, isLockedIn]);
 
   useEffect(() => {
     if (!reaction) return;
     setAmbientEmote(null);
   }, [reaction]);
 
-  useEffect(() => {
-    if (currentEnergy > 20) {
-      setAmbientEmote((prev) => prev);
-    }
-  }, [currentEnergy]);
-
   const smoothX = useSpring(mouseX, {
-    stiffness: isSleepy ? 55 : focusMode ? 80 : 120,
-    damping: isSleepy ? 28 : focusMode ? 24 : 20,
+    stiffness: isSleepy ? 55 : isLockedIn ? 110 : focusMode ? 80 : 120,
+    damping: isSleepy ? 28 : isLockedIn ? 30 : focusMode ? 24 : 20,
   });
 
   const smoothY = useSpring(mouseY, {
-    stiffness: isSleepy ? 55 : focusMode ? 80 : 120,
-    damping: isSleepy ? 28 : focusMode ? 24 : 20,
+    stiffness: isSleepy ? 55 : isLockedIn ? 110 : focusMode ? 80 : 120,
+    damping: isSleepy ? 28 : isLockedIn ? 30 : focusMode ? 24 : 20,
   });
 
   const pupilX = useTransform(
     smoothX,
     [-1, 1],
-    isSleepy ? [-2, 2] : focusMode ? [-3, 3] : [-4, 4]
+    isSleepy ? [-2, 2] : isLockedIn ? [-2, 2] : focusMode ? [-3, 3] : [-4, 4]
   );
 
   const pupilY = useTransform(
     smoothY,
     [-1, 1],
-    isSleepy ? [1, 3] : focusMode ? [0, 3] : [-1, 5]
+    isSleepy ? [1, 3] : isLockedIn ? [0.5, 2.2] : focusMode ? [0, 3] : [-1, 5]
   );
 
   const scale =
@@ -236,6 +240,10 @@ export default function GhostPet({
 
   const glowClass = isSleepy
     ? "bg-slate-300/5"
+    : isLockedIn
+    ? "bg-violet-300/12"
+    : focusPaused
+    ? "bg-indigo-300/5"
     : focusMode
     ? "bg-indigo-300/6"
     : mood >= 70
@@ -245,11 +253,19 @@ export default function GhostPet({
     : "bg-slate-300/6";
 
   const showAmbientEmote = !reaction && ambientEmote;
-  const eyelidScaleY = isBlinking ? 1 : isSleepy ? 0.34 : 0;
+  const eyelidScaleY = isBlinking ? 1 : isSleepy ? 0.34 : focusPaused ? 0.18 : 0;
 
   return (
     <div className="relative mx-auto flex h-72 w-64 items-center justify-center">
-      <div className={`absolute h-36 w-36 rounded-full ${glowClass} blur-3xl`} />
+      <div
+        className={`absolute h-36 w-36 rounded-full ${glowClass} blur-3xl transition-all duration-500 ${
+          isLockedIn
+            ? "scale-110 opacity-100"
+            : focusPaused
+            ? "scale-100 opacity-75"
+            : "scale-100 opacity-100"
+        }`}
+      />
 
       <AnimatePresence mode="wait">
         {showSleepZs ? (
@@ -631,6 +647,10 @@ export default function GhostPet({
             ? yFloat
             : isSleepy
             ? [0, -6, 0]
+            : isLockedIn
+            ? [0, -5, 0]
+            : focusPaused
+            ? [0, -4, 0]
             : focusMode
             ? [0, -7, 0]
             : [0, -10, 0],
@@ -638,6 +658,10 @@ export default function GhostPet({
             ? 0
             : isSleepy
             ? [0, 2, 0, -2, 0]
+            : isLockedIn
+            ? [0, 1, 0, -1, 0]
+            : focusPaused
+            ? [0, 1, 0, -1, 0]
             : focusMode
             ? [0, 2, 0, -2, 0]
             : [0, 4, 0, -4, 0],
@@ -652,18 +676,42 @@ export default function GhostPet({
               : 0
             : isSleepy
             ? [0, 0.5, 0, -0.5, 0]
+            : isLockedIn
+            ? [0, 0.25, 0, -0.25, 0]
+            : focusPaused
+            ? [0, 0.35, 0, -0.35, 0]
             : focusMode
             ? [0, 0.6, 0, -0.6, 0]
             : [0, 1.2, 0, -1.2, 0],
         }}
         transition={{
           y: {
-            duration: reaction ? 0.5 : isSleepy ? 4.5 : focusMode ? 3.8 : 2.8,
+            duration: reaction
+              ? 0.5
+              : isSleepy
+              ? 4.5
+              : isLockedIn
+              ? 4.2
+              : focusPaused
+              ? 4.8
+              : focusMode
+              ? 3.8
+              : 2.8,
             ease: "easeInOut",
             repeat: reaction ? 0 : Infinity,
           },
           x: {
-            duration: reaction ? 0.5 : isSleepy ? 5 : focusMode ? 5 : 4.2,
+            duration: reaction
+              ? 0.5
+              : isSleepy
+              ? 5
+              : isLockedIn
+              ? 5.6
+              : focusPaused
+              ? 5.6
+              : focusMode
+              ? 5
+              : 4.2,
             ease: "easeInOut",
             repeat: reaction ? 0 : Infinity,
           },
@@ -673,13 +721,25 @@ export default function GhostPet({
             repeat: reaction ? 0 : Infinity,
           },
           rotate: {
-            duration: reaction ? 0.45 : isSleepy ? 5 : focusMode ? 5 : 4.2,
+            duration: reaction
+              ? 0.45
+              : isSleepy
+              ? 5
+              : isLockedIn
+              ? 5.8
+              : focusPaused
+              ? 5.8
+              : focusMode
+              ? 5
+              : 4.2,
             ease: "easeInOut",
             repeat: reaction ? 0 : Infinity,
           },
         }}
         whileTap={{ scale: 0.95 }}
-        className="relative z-10"
+        className={`relative z-10 transition-all duration-500 ${
+          focusPaused ? "opacity-85 saturate-75" : "opacity-100"
+        }`}
       >
         <div className="relative h-[220px] w-[220px]">
           <Image
@@ -688,7 +748,13 @@ export default function GhostPet({
             width={220}
             height={220}
             priority
-            className="select-none"
+            className={`select-none transition-all duration-500 ${
+              isLockedIn
+                ? "drop-shadow-[0_0_22px_rgba(167,139,250,0.22)]"
+                : focusPaused
+                ? "drop-shadow-[0_0_12px_rgba(129,140,248,0.12)]"
+                : "drop-shadow-[0_0_16px_rgba(255,255,255,0.04)]"
+            }`}
           />
 
           <div className="absolute left-[82px] top-[76px] h-[26px] w-[26px] overflow-hidden rounded-full">
@@ -733,6 +799,10 @@ export default function GhostPet({
               : [1, 0.86, 1]
             : isSleepy
             ? [1, 0.95, 1]
+            : isLockedIn
+            ? [1, 0.97, 1]
+            : focusPaused
+            ? [1, 0.96, 1]
             : focusMode
             ? [1, 0.94, 1]
             : [1, 0.9, 1, 0.86, 1],
@@ -740,6 +810,10 @@ export default function GhostPet({
             ? 0
             : isSleepy
             ? [0, 1, 0, -1, 0]
+            : isLockedIn
+            ? [0, 0.5, 0, -0.5, 0]
+            : focusPaused
+            ? [0, 0.5, 0, -0.5, 0]
             : focusMode
             ? [0, 1, 0, -1, 0]
             : [0, 3, 0, -3, 0],
@@ -747,23 +821,57 @@ export default function GhostPet({
             ? [0.12, 0.18, 0.12]
             : isSleepy
             ? [0.08, 0.12, 0.08]
+            : isLockedIn
+            ? [0.08, 0.1, 0.08]
+            : focusPaused
+            ? [0.07, 0.1, 0.07]
             : focusMode
             ? [0.08, 0.12, 0.08]
             : [0.1, 0.16, 0.1],
         }}
         transition={{
           scaleX: {
-            duration: reaction ? 0.5 : isSleepy ? 4.5 : focusMode ? 4.2 : 4.2,
+            duration: reaction
+              ? 0.5
+              : isSleepy
+              ? 4.5
+              : isLockedIn
+              ? 5.2
+              : focusPaused
+              ? 5.2
+              : focusMode
+              ? 4.2
+              : 4.2,
             ease: "easeInOut",
             repeat: reaction ? 0 : Infinity,
           },
           x: {
-            duration: reaction ? 0.5 : isSleepy ? 5 : focusMode ? 5 : 4.2,
+            duration: reaction
+              ? 0.5
+              : isSleepy
+              ? 5
+              : isLockedIn
+              ? 5.8
+              : focusPaused
+              ? 5.8
+              : focusMode
+              ? 5
+              : 4.2,
             ease: "easeInOut",
             repeat: reaction ? 0 : Infinity,
           },
           opacity: {
-            duration: reaction ? 0.5 : isSleepy ? 4.5 : focusMode ? 4.2 : 2.8,
+            duration: reaction
+              ? 0.5
+              : isSleepy
+              ? 4.5
+              : isLockedIn
+              ? 5.2
+              : focusPaused
+              ? 5.2
+              : focusMode
+              ? 4.2
+              : 2.8,
             ease: "easeInOut",
             repeat: reaction ? 0 : Infinity,
           },

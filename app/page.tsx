@@ -97,6 +97,7 @@ function buildHistoryEntry(
     actualMinutes: Math.max(1, Math.round(actualSeconds / 60)),
     startTime: session.startTime,
     endTime: new Date().toISOString(),
+    status: completed ? "completed" : "cancelled",
     completed,
   };
 }
@@ -117,6 +118,103 @@ function getFocusNudge(elapsedSeconds: number, taskLabel?: string) {
   }
 
   return `small progress still counts${taskText}. keep going 💜`;
+}
+
+function normalizeTaskLabel(label?: string) {
+  const trimmed = label?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "Unlabeled";
+}
+
+function getCompletionRate(history: FocusSessionHistoryEntry[]) {
+  if (history.length === 0) return 0;
+
+  const completedCount = history.filter((session) => session.completed).length;
+  return Math.round((completedCount / history.length) * 100);
+}
+
+function getTopLabel(history: FocusSessionHistoryEntry[]) {
+  const minutesByLabel = new Map<string, number>();
+
+  history.forEach((session) => {
+    if (!session.completed) return;
+
+    const label = normalizeTaskLabel(session.taskLabel);
+    minutesByLabel.set(
+      label,
+      (minutesByLabel.get(label) ?? 0) + session.actualMinutes
+    );
+  });
+
+  let topLabel: string | null = null;
+  let topMinutes = 0;
+
+  for (const [label, minutes] of minutesByLabel.entries()) {
+    if (minutes > topMinutes) {
+      topLabel = label;
+      topMinutes = minutes;
+    }
+  }
+
+  return topLabel;
+}
+
+function getLongestSessionMinutes(history: FocusSessionHistoryEntry[]) {
+  return history.reduce((max, session) => {
+    if (!session.completed) return max;
+    return Math.max(max, session.actualMinutes);
+  }, 0);
+}
+
+function getMinutesByLabel(history: FocusSessionHistoryEntry[]) {
+  const labelMap = new Map<
+    string,
+    { label: string; minutes: number; sessions: number }
+  >();
+
+  history.forEach((session) => {
+    if (!session.completed) return;
+
+    const label = normalizeTaskLabel(session.taskLabel);
+    const existing = labelMap.get(label);
+
+    if (existing) {
+      existing.minutes += session.actualMinutes;
+      existing.sessions += 1;
+      return;
+    }
+
+    labelMap.set(label, {
+      label,
+      minutes: session.actualMinutes,
+      sessions: 1,
+    });
+  });
+
+  return Array.from(labelMap.values()).sort((a, b) => b.minutes - a.minutes);
+}
+
+function getStatsAwareDialogue({
+  topLabel,
+  completionRate,
+  todaySessions,
+}: {
+  topLabel: string | null;
+  completionRate: number;
+  todaySessions: number;
+}) {
+  if (todaySessions >= 4) {
+    return "you’ve been really steady today. i’m very proud of you 💜";
+  }
+
+  if (completionRate >= 80) {
+    return "you’ve been finishing what you start lately. that’s huge ✨";
+  }
+
+  if (topLabel && topLabel !== "Unlabeled") {
+    return `you and i have been spending a lot of time on ${topLabel} lately 👻`;
+  }
+
+  return null;
 }
 
 export default function HomePage() {
@@ -160,6 +258,33 @@ export default function HomePage() {
     [focusHistory]
   );
   const streak = useMemo(() => getCurrentStreak(focusHistory), [focusHistory]);
+
+  const completionRate = useMemo(
+    () => getCompletionRate(focusHistory),
+    [focusHistory]
+  );
+
+  const topLabel = useMemo(() => getTopLabel(focusHistory), [focusHistory]);
+
+  const longestSessionMinutes = useMemo(
+    () => getLongestSessionMinutes(focusHistory),
+    [focusHistory]
+  );
+
+  const minutesByLabel = useMemo(
+    () => getMinutesByLabel(focusHistory),
+    [focusHistory]
+  );
+
+  const suggestedLabels = useMemo(() => {
+    return Array.from(
+      new Set(
+        focusHistory
+          .map((session) => session.taskLabel?.trim())
+          .filter((label): label is string => Boolean(label))
+      )
+    ).slice(0, 5);
+  }, [focusHistory]);
 
   const triggerFocusCelebration = () => {
     setShowFocusCelebration(true);
@@ -326,7 +451,7 @@ export default function HomePage() {
     }
 
     setIsLoaded(true);
-  }, [todayMinutes, streak]);
+  }, []);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -352,17 +477,30 @@ export default function HomePage() {
     if (!isLoaded || focusMode) return;
 
     const interval = setInterval(() => {
-      setPet((current) => ({
-        ...current,
-        currentDialogue: getContextualDialogue({
-          mood: current.happiness,
-          energy: current.energy,
-        }),
-      }));
+      setPet((current) => {
+        const statsLine = getStatsAwareDialogue({
+          topLabel,
+          completionRate,
+          todaySessions: todaySessions.length,
+        });
+
+        const nextDialogue =
+          statsLine && Math.random() < 0.45
+            ? statsLine
+            : getContextualDialogue({
+                mood: current.happiness,
+                energy: current.energy,
+              });
+
+        return {
+          ...current,
+          currentDialogue: nextDialogue,
+        };
+      });
     }, AMBIENT_DIALOGUE_EVERY_MS);
 
     return () => clearInterval(interval);
-  }, [isLoaded, focusMode]);
+  }, [isLoaded, focusMode, topLabel, completionRate, todaySessions.length]);
 
   useEffect(() => {
     const handleActivity = () => {
@@ -411,7 +549,7 @@ export default function HomePage() {
     }, 15000);
 
     return () => window.clearInterval(interval);
-  }, [focusMode, activeFocusSession, lastActivityAt, focusSecondsLeft]);
+  }, [focusMode, activeFocusSession, lastActivityAt]);
 
   useEffect(() => {
     if (
@@ -482,13 +620,7 @@ export default function HomePage() {
     return () => window.clearInterval(timer);
   }, [
     focusMode,
-    activeFocusSession?.status,
-    activeFocusSession?.startTime,
-    activeFocusSession?.plannedMinutes,
-    activeFocusSession?.taskLabel,
-    activeFocusSession?.totalPausedSeconds,
-    todayMinutes,
-    streak,
+    activeFocusSession,
     lastNudgeBucket,
   ]);
 
@@ -729,6 +861,7 @@ export default function HomePage() {
               energy={pet.energy}
               reaction={reaction}
               focusMode={focusMode}
+              focusPaused={activeFocusSession?.status === "paused"}
             />
           </div>
 
@@ -794,6 +927,21 @@ export default function HomePage() {
                   placeholder="optional focus label, like portfolio or bug fixes"
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/35 outline-none transition focus:border-violet-300/25 focus:bg-white/8"
                 />
+
+                {suggestedLabels.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {suggestedLabels.map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setFocusTaskLabel(label)}
+                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -814,10 +962,50 @@ export default function HomePage() {
               streak={streak}
             />
 
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+                  Top Label
+                </p>
+                <p className="mt-1 text-sm text-white">
+                  {topLabel ?? "None yet"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+                  Completion Rate
+                </p>
+                <p className="mt-1 text-sm text-white">
+                  {completionRate}%
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+                  Longest Session
+                </p>
+                <p className="mt-1 text-sm text-white">
+                  {longestSessionMinutes} min
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+                  Task Types
+                </p>
+                <p className="mt-1 text-sm text-white">
+                  {minutesByLabel.length}
+                </p>
+              </div>
+            </div>
+
             <FocusHistoryCard
               totalSessions={focusSessionCount}
               totalMinutes={totalFocusedMinutes}
               recentSessions={recentFocusSessions}
+              topLabel={topLabel}
+              completionRate={completionRate}
             />
 
             <div className="mt-4">

@@ -1,128 +1,136 @@
-type FocusHistoryItem = {
-  id: string;
-  actualMinutes: number;
-  completed: boolean;
-  endTime: string;
-};
+"use client";
+
+import { FocusSessionHistoryEntry } from "@/lib/types";
 
 type FocusHistoryCardProps = {
   totalSessions: number;
   totalMinutes: number;
-  recentSessions: FocusHistoryItem[];
+  recentSessions: FocusSessionHistoryEntry[];
+  topLabel: string | null;
+  completionRate: number;
 };
 
-function formatSessionTime(dateString: string) {
+function formatSessionDate(dateString: string) {
   const date = new Date(dateString);
 
-  return date.toLocaleTimeString([], {
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
 }
 
-function getWispHistoryLine(totalSessions: number, totalMinutes: number) {
-  if (totalSessions === 0) {
-    return "we can start tiny. one cozy focus session is enough ✨";
-  }
-
-  if (totalMinutes >= 120) {
-    return "you have been working so hard. tiny ghost is very impressed ✨";
-  }
-
-  if (totalMinutes >= 60) {
-    return "look at you go. that is some real focus magic 💜";
-  }
-
-  if (totalSessions >= 3) {
-    return "three whole sessions? okay productivity legend 👻";
-  }
-
-  return "every little session counts. i am proud of you 💫";
+function getSessionTitle(session: FocusSessionHistoryEntry) {
+  const trimmed = session.taskLabel?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "Unlabeled session";
 }
 
 export default function FocusHistoryCard({
   totalSessions,
   totalMinutes,
   recentSessions,
+  topLabel,
+  completionRate,
 }: FocusHistoryCardProps) {
   return (
-    <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className="mt-4 rounded-[28px] border border-white/10 bg-white/5 p-5 shadow-xl backdrop-blur-xl">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-white/45">
+          <p className="text-xs uppercase tracking-[0.24em] text-white/45">
             Focus History
           </p>
-          <p className="mt-2 text-sm text-white/70">
-            {getWispHistoryLine(totalSessions, totalMinutes)}
-          </p>
+          <h3 className="mt-2 text-lg font-semibold text-white">
+            your tiny archive of effort
+          </h3>
         </div>
 
-        <div className="text-right">
-          <p className="text-lg font-semibold text-white">{totalSessions}</p>
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/45">
-            sessions
+        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-right">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-white/40">
+            Completion
           </p>
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-white/8 bg-black/10 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">
-            total focused
-          </p>
-          <p className="mt-1 text-base font-medium text-white">
-            {totalMinutes} min
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-white/8 bg-black/10 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">
-            completed
-          </p>
-          <p className="mt-1 text-base font-medium text-white">
-            {recentSessions.filter((session) => session.completed).length} recent
+          <p className="mt-1 text-sm font-medium text-white">
+            {completionRate}%
           </p>
         </div>
       </div>
 
-      <div className="mt-4">
-        <p className="text-[11px] uppercase tracking-[0.16em] text-white/40">
-          recent sessions
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-white/40">
+            Sessions
+          </p>
+          <p className="mt-1 text-sm text-white">{totalSessions}</p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-white/40">
+            Minutes
+          </p>
+          <p className="mt-1 text-sm text-white">{totalMinutes}</p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-white/40">
+            Top Label
+          </p>
+          <p className="mt-1 truncate text-sm text-white">
+            {topLabel ?? "None yet"}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <p className="text-xs uppercase tracking-[0.2em] text-white/40">
+          Recent Sessions
         </p>
 
-        <div className="mt-2 space-y-2">
-          {recentSessions.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/10 px-3 py-3 text-sm text-white/45">
-              no focus sessions yet
-            </div>
-          ) : (
-            recentSessions.map((session) => (
-              <div
-                key={session.id}
-                className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-3"
-              >
-                <div>
-                  <p className="text-sm text-white">
-                    {session.actualMinutes} min
-                  </p>
-                  <p className="text-xs text-white/45">
-                    {formatSessionTime(session.endTime)}
-                  </p>
-                </div>
+        {recentSessions.length === 0 ? (
+          <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-white/55">
+            no focus sessions yet. your ghost believes in your future productivity arc ✨
+          </div>
+        ) : (
+          <div className="mt-3 space-y-3">
+            {recentSessions.map((session) => {
+              const completed = session.status === "completed";
 
-                <span
-                  className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.14em] ${
-                    session.completed
-                      ? "bg-emerald-300/12 text-emerald-200"
-                      : "bg-white/8 text-white/55"
-                  }`}
+              return (
+                <div
+                  key={session.id}
+                  className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"
                 >
-                  {session.completed ? "complete" : "ended early"}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">
+                        {getSessionTitle(session)}
+                      </p>
+                      <p className="mt-1 text-xs text-white/50">
+                        {formatSessionDate(session.endTime)}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                        completed
+                          ? "border border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+                          : "border border-rose-300/20 bg-rose-300/10 text-rose-100"
+                      }`}
+                    >
+                      {completed ? "Completed" : "Cancelled"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between text-sm text-white/75">
+                    <span>{session.actualMinutes} min focused</span>
+                    <span className="text-white/45">
+                      planned {session.plannedMinutes} min
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

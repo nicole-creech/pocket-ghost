@@ -40,7 +40,14 @@ export interface FocusSessionHistoryEntry {
   actualMinutes: number;
   startTime: string;
   endTime: string;
+  status: "completed" | "cancelled";
   completed: boolean;
+}
+
+export interface FocusLabelStat {
+  label: string;
+  minutes: number;
+  sessions: number;
 }
 
 export type GhostMood =
