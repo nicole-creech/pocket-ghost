@@ -2,7 +2,7 @@
   "name": "pocket-ghost",
   "displayName": "Pocket Ghost",
   "description": "A tiny spectral coding companion for focus sessions and gentle morale support.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "nicole-creech",
   "repository": {
     "type": "git",
