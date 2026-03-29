@@ -5,9 +5,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import ActionPanel from "@/components/ActionPanel";
 import DialogueBubble from "@/components/DialogueBubble";
 import GhostPet from "@/components/GhostPet";
-import StatusBar from "@/components/StatusBar";
-import FocusHistoryCard from "@/components/FocusHistoryCard";
-import FocusTodayCard from "@/components/FocusTodayCard";
+import SidebarSection from "@/components/SidebarSection";
+import CompactStatChip from "@/components/CompactStatChip";
+import MiniStatusBar from "@/components/MiniStatusBar";
 import {
   DEFAULT_PET,
   getCancelledFocusDialogue,
@@ -16,17 +16,19 @@ import {
   getStatsAwareDialogue,
   getWelcomeBackDialogue,
 } from "@/lib/pet-data";
+import { browserCompanionStorage } from "@/lib/companion-storage";
 import {
-  addFocusSessionHistoryEntry,
-  clearActiveFocusSession,
-  getActiveFocusSession,
-  getFocusSessionHistory,
-  loadPet,
-  resetAllAppData,
-  resetTodayFocusData,
-  saveActiveFocusSession,
-  savePet,
-} from "@/lib/storage";
+  cancelFocusSession,
+  clamp,
+  FOCUS_NUDGE_EVERY_SECONDS,
+  formatTime,
+  getFocusNudge,
+  pauseFocusSession,
+  restoreSavedFocusSession,
+  resumeFocusSession,
+  startFocusSession,
+  tickFocusSession,
+} from "@/lib/focus-controller";
 import {
   FocusSession,
   FocusSessionHistoryEntry,
@@ -42,12 +44,7 @@ import {
 const FOCUS_DURATION_MINUTES = 25;
 const FOCUS_DURATION_SECONDS = FOCUS_DURATION_MINUTES * 60;
 const AUTO_PAUSE_AFTER_SECONDS = 5 * 60;
-const FOCUS_NUDGE_EVERY_SECONDS = 10 * 60;
 const AMBIENT_DIALOGUE_EVERY_MS = 20000;
-
-function clamp(value: number) {
-  return Math.max(0, Math.min(100, value));
-}
 
 function applyLightDecay(pet: Pet): Pet {
   const now = new Date();
@@ -63,64 +60,6 @@ function applyLightDecay(pet: Pet): Pet {
     energy: clamp(pet.energy - hoursPassed * 3),
     lastUpdated: now.toISOString(),
   };
-}
-
-function formatTime(seconds: number) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-}
-
-function getElapsedSeconds(session: FocusSession) {
-  const start = new Date(session.startTime).getTime();
-  const now = Date.now();
-  return Math.max(0, Math.floor((now - start) / 1000));
-}
-
-function getRemainingSeconds(session: FocusSession) {
-  const elapsed = getElapsedSeconds(session);
-  const pausedSeconds = session.totalPausedSeconds ?? 0;
-  const effectiveElapsed = Math.max(0, elapsed - pausedSeconds);
-  return Math.max(0, session.plannedMinutes * 60 - effectiveElapsed);
-}
-
-function buildHistoryEntry(
-  session: FocusSession,
-  completed: boolean
-): FocusSessionHistoryEntry {
-  const actualSeconds = Math.min(
-    session.elapsedSeconds,
-    session.plannedMinutes * 60
-  );
-
-  return {
-    id: session.id,
-    taskLabel: session.taskLabel,
-    plannedMinutes: session.plannedMinutes,
-    actualMinutes: Math.max(1, Math.round(actualSeconds / 60)),
-    startTime: session.startTime,
-    endTime: new Date().toISOString(),
-    status: completed ? "completed" : "cancelled",
-    completed,
-  };
-}
-
-function getFocusNudge(elapsedSeconds: number, taskLabel?: string) {
-  const taskText = taskLabel?.trim() ? ` on ${taskLabel.trim()}` : "";
-
-  if (elapsedSeconds >= 60 * 60) {
-    return `you have been locked in${taskText} for a while. hydration check 💧`;
-  }
-
-  if (elapsedSeconds >= 45 * 60) {
-    return `steady progress${taskText}. you are doing really well ✨`;
-  }
-
-  if (elapsedSeconds >= 30 * 60) {
-    return `look at you staying with it${taskText}. i’m proud of you 👻`;
-  }
-
-  return `small progress still counts${taskText}. keep going 💜`;
 }
 
 function normalizeTaskLabel(label?: string) {
@@ -196,34 +135,50 @@ function getMinutesByLabel(history: FocusSessionHistoryEntry[]) {
   return Array.from(labelMap.values()).sort((a, b) => b.minutes - a.minutes);
 }
 
+function formatSessionDate(dateString: string) {
+  const date = new Date(dateString);
+
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function getSessionTitle(session: FocusSessionHistoryEntry) {
+  const trimmed = session.taskLabel?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "Unlabeled";
+}
+
 export default function HomePage() {
-  // pet/app state
   const [pet, setPet] = useState<Pet>(DEFAULT_PET);
   const [isLoaded, setIsLoaded] = useState(false);
   const [reaction, setReaction] = useState<string | null>(null);
 
-  // focus session state
   const [focusMode, setFocusMode] = useState(false);
-  const [focusSecondsLeft, setFocusSecondsLeft] = useState(
-    FOCUS_DURATION_SECONDS
-  );
+  const [focusSecondsLeft, setFocusSecondsLeft] =
+    useState(FOCUS_DURATION_SECONDS);
   const [activeFocusSession, setActiveFocusSession] =
     useState<FocusSession | null>(null);
   const [focusSessionCount, setFocusSessionCount] = useState(0);
-  const [focusTaskLabel, setFocusTaskLabel] = useState("");
 
-  // ui state
   const [showFocusCelebration, setShowFocusCelebration] = useState(false);
   const [showResetOptions, setShowResetOptions] = useState(false);
 
-  // timing/behavior helpers
-  const [lastActivityAt, setLastActivityAt] = useState(() => Date.now());
-  const [lastReturnAt, setLastReturnAt] = useState(() => 0);
+  const [focusTaskLabel, setFocusTaskLabel] = useState("");
+  const [lastActivityAt, setLastActivityAt] = useState(Date.now());
   const [wasAutoPaused, setWasAutoPaused] = useState(false);
   const [lastNudgeBucket, setLastNudgeBucket] = useState(0);
+  const [lastReturnAt, setLastReturnAt] = useState(0);
+
+  const [todayOpen, setTodayOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const focusHistory = useMemo(
-    () => getFocusSessionHistory(),
+    () => browserCompanionStorage.loadFocusHistory(),
     [focusSessionCount]
   );
 
@@ -232,7 +187,7 @@ export default function HomePage() {
   }, [focusHistory]);
 
   const recentFocusSessions = useMemo(() => {
-    return focusHistory.slice(0, 3);
+    return focusHistory.slice(0, 5);
   }, [focusHistory]);
 
   const todaySessions = useMemo(
@@ -269,7 +224,7 @@ export default function HomePage() {
           .map((session) => session.taskLabel?.trim())
           .filter((label): label is string => Boolean(label))
       )
-    ).slice(0, 5);
+    ).slice(0, 4);
   }, [focusHistory]);
 
   const triggerFocusCelebration = () => {
@@ -306,18 +261,16 @@ export default function HomePage() {
     setLastActivityAt(now);
   };
 
-  const pauseFocusSession = (reason: "manual" | "auto" = "manual") => {
+  const handlePauseFocusSession = (reason: "manual" | "auto" = "manual") => {
     setActiveFocusSession((current) => {
       if (!current || current.status === "paused") return current;
 
-      const updatedSession: FocusSession = {
-        ...current,
-        elapsedSeconds: current.plannedMinutes * 60 - focusSecondsLeft,
-        status: "paused",
-        pausedAt: new Date().toISOString(),
-      };
+      const updatedSession = pauseFocusSession({
+        session: current,
+        focusSecondsLeft,
+        storage: browserCompanionStorage,
+      });
 
-      saveActiveFocusSession(updatedSession);
       return updatedSession;
     });
 
@@ -341,28 +294,15 @@ export default function HomePage() {
     }
   };
 
-  const resumeFocusSession = (reason: "manual" | "auto" = "manual") => {
+  const handleResumeFocusSession = (reason: "manual" | "auto" = "manual") => {
     setActiveFocusSession((current) => {
       if (!current || current.status !== "paused") return current;
 
-      const pausedAt = current.pausedAt
-        ? new Date(current.pausedAt)
-        : new Date();
+      const updatedSession = resumeFocusSession({
+        session: current,
+        storage: browserCompanionStorage,
+      });
 
-      const pausedDurationSeconds = Math.max(
-        0,
-        Math.floor((Date.now() - pausedAt.getTime()) / 1000)
-      );
-
-      const updatedSession: FocusSession = {
-        ...current,
-        status: "running",
-        pausedAt: undefined,
-        totalPausedSeconds:
-          (current.totalPausedSeconds ?? 0) + pausedDurationSeconds,
-      };
-
-      saveActiveFocusSession(updatedSession);
       return updatedSession;
     });
 
@@ -381,7 +321,7 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    const savedPet = loadPet();
+    const savedPet = browserCompanionStorage.loadPet();
 
     if (savedPet) {
       const updatedPet = applyLightDecay({
@@ -389,66 +329,52 @@ export default function HomePage() {
         visits: (savedPet.visits ?? 0) + 1,
       });
       setPet(updatedPet);
-      savePet(updatedPet);
+      browserCompanionStorage.savePet(updatedPet);
     } else {
-      savePet(DEFAULT_PET);
+      browserCompanionStorage.savePet(DEFAULT_PET);
     }
 
-    const history = getFocusSessionHistory();
+    const history = browserCompanionStorage.loadFocusHistory();
     setFocusSessionCount(history.length);
 
-    const savedSession = getActiveFocusSession();
+    const restored = restoreSavedFocusSession({
+      storage: browserCompanionStorage,
+    });
 
-    if (savedSession) {
-      const remaining = getRemainingSeconds(savedSession);
+    if (restored.type === "completed") {
+      setFocusSessionCount(history.length + 1);
 
-      if (remaining <= 0) {
-        const completedSession: FocusSession = {
-          ...savedSession,
-          elapsedSeconds: savedSession.plannedMinutes * 60,
-          status: "completed",
-          endTime: new Date().toISOString(),
-        };
+      setPet((current) => {
+        const nextHappiness = clamp(current.happiness + 6);
 
-        addFocusSessionHistoryEntry(buildHistoryEntry(completedSession, true));
-        clearActiveFocusSession();
-        setFocusSessionCount(history.length + 1);
-
-        setPet((current) => {
-          const nextHappiness = clamp(current.happiness + 6);
-
-          return {
-            ...current,
-            happiness: nextHappiness,
-            currentDialogue: getFocusCompleteDialogue(savedSession.taskLabel),
-            lastUpdated: new Date().toISOString(),
-          };
-        });
-
-        triggerReaction("focus-complete", 1200);
-        triggerFocusCelebration();
-      } else {
-        const restoredSession: FocusSession = {
-          ...savedSession,
-          elapsedSeconds: savedSession.plannedMinutes * 60 - remaining,
-        };
-
-        setActiveFocusSession(restoredSession);
-        setFocusMode(true);
-        setFocusSecondsLeft(remaining);
-        setFocusTaskLabel(restoredSession.taskLabel ?? "");
-        setLastNudgeBucket(
-          Math.floor(restoredSession.elapsedSeconds / FOCUS_NUDGE_EVERY_SECONDS)
-        );
-
-        setPet((current) => ({
+        return {
           ...current,
-          currentDialogue:
-            restoredSession.status === "paused"
-              ? "your focus session is paused. we can pick it back up whenever ✨"
-              : "we're still in focus mode. you're doing amazing ✨",
-        }));
-      }
+          happiness: nextHappiness,
+          currentDialogue: getFocusCompleteDialogue(restored.session.taskLabel),
+          lastUpdated: new Date().toISOString(),
+        };
+      });
+
+      triggerReaction("focus-complete", 1200);
+      triggerFocusCelebration();
+    }
+
+    if (restored.type === "restored") {
+      setActiveFocusSession(restored.session);
+      setFocusMode(true);
+      setFocusSecondsLeft(restored.remaining);
+      setFocusTaskLabel(restored.session.taskLabel ?? "");
+      setLastNudgeBucket(
+        Math.floor(restored.session.elapsedSeconds / FOCUS_NUDGE_EVERY_SECONDS)
+      );
+
+      setPet((current) => ({
+        ...current,
+        currentDialogue:
+          restored.session.status === "paused"
+            ? "your focus session is paused. we can pick it back up whenever ✨"
+            : "we're still in focus mode. you're doing amazing ✨",
+      }));
     }
 
     setIsLoaded(true);
@@ -456,7 +382,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!isLoaded) return;
-    savePet(pet);
+    browserCompanionStorage.savePet(pet);
   }, [pet, isLoaded]);
 
   useEffect(() => {
@@ -538,7 +464,7 @@ export default function HomePage() {
       activeFocusSession.status === "paused" &&
       wasAutoPaused
     ) {
-      resumeFocusSession("auto");
+      handleResumeFocusSession("auto");
     }
   }, [lastActivityAt, focusMode, activeFocusSession, wasAutoPaused]);
 
@@ -555,7 +481,7 @@ export default function HomePage() {
       const inactiveForSeconds = Math.floor((Date.now() - lastActivityAt) / 1000);
 
       if (inactiveForSeconds >= AUTO_PAUSE_AFTER_SECONDS) {
-        pauseFocusSession("auto");
+        handlePauseFocusSession("auto");
       }
     }, 15000);
 
@@ -572,20 +498,12 @@ export default function HomePage() {
     }
 
     const tick = () => {
-      const remaining = getRemainingSeconds(activeFocusSession);
-      const elapsed = activeFocusSession.plannedMinutes * 60 - remaining;
+      const result = tickFocusSession({
+        session: activeFocusSession,
+        storage: browserCompanionStorage,
+      });
 
-      if (remaining <= 0) {
-        const completedSession: FocusSession = {
-          ...activeFocusSession,
-          elapsedSeconds: activeFocusSession.plannedMinutes * 60,
-          status: "completed",
-          endTime: new Date().toISOString(),
-        };
-
-        addFocusSessionHistoryEntry(buildHistoryEntry(completedSession, true));
-        clearActiveFocusSession();
-
+      if (result.type === "completed") {
         setFocusMode(false);
         setFocusSecondsLeft(FOCUS_DURATION_SECONDS);
         setActiveFocusSession(null);
@@ -599,9 +517,7 @@ export default function HomePage() {
           return {
             ...current,
             happiness: nextHappiness,
-            currentDialogue: getFocusCompleteDialogue(
-              activeFocusSession.taskLabel
-            ),
+            currentDialogue: getFocusCompleteDialogue(result.session.taskLabel),
             lastUpdated: new Date().toISOString(),
           };
         });
@@ -611,15 +527,20 @@ export default function HomePage() {
         return;
       }
 
-      setFocusSecondsLeft(remaining);
+      setFocusSecondsLeft(result.remaining);
 
-      const currentNudgeBucket = Math.floor(elapsed / FOCUS_NUDGE_EVERY_SECONDS);
+      const currentNudgeBucket = Math.floor(
+        result.elapsed / FOCUS_NUDGE_EVERY_SECONDS
+      );
 
       if (currentNudgeBucket > 0 && currentNudgeBucket > lastNudgeBucket) {
         setLastNudgeBucket(currentNudgeBucket);
         setPet((current) => ({
           ...current,
-          currentDialogue: getFocusNudge(elapsed, activeFocusSession.taskLabel),
+          currentDialogue: getFocusNudge(
+            result.elapsed,
+            activeFocusSession.taskLabel
+          ),
           lastUpdated: new Date().toISOString(),
         }));
       }
@@ -677,7 +598,7 @@ export default function HomePage() {
   };
 
   const handleResetToday = () => {
-    resetTodayFocusData();
+    browserCompanionStorage.resetTodayFocusData();
 
     setFocusMode(false);
     setFocusSecondsLeft(FOCUS_DURATION_SECONDS);
@@ -685,7 +606,7 @@ export default function HomePage() {
     setWasAutoPaused(false);
     setLastNudgeBucket(0);
 
-    const updatedHistory = getFocusSessionHistory();
+    const updatedHistory = browserCompanionStorage.loadFocusHistory();
     setFocusSessionCount(updatedHistory.length);
 
     setPet((current) => ({
@@ -698,7 +619,7 @@ export default function HomePage() {
   };
 
   const handleResetAll = () => {
-    resetAllAppData();
+    browserCompanionStorage.resetAllAppData();
 
     const freshPet: Pet = {
       ...DEFAULT_PET,
@@ -708,7 +629,7 @@ export default function HomePage() {
     };
 
     setPet(freshPet);
-    savePet(freshPet);
+    browserCompanionStorage.savePet(freshPet);
 
     setFocusMode(false);
     setFocusSecondsLeft(FOCUS_DURATION_SECONDS);
@@ -726,16 +647,11 @@ export default function HomePage() {
     markActivity();
 
     if (focusMode && activeFocusSession) {
-      const cancelledSession: FocusSession = {
-        ...activeFocusSession,
-        elapsedSeconds:
-          activeFocusSession.plannedMinutes * 60 - focusSecondsLeft,
-        status: "cancelled",
-        endTime: new Date().toISOString(),
-      };
-
-      addFocusSessionHistoryEntry(buildHistoryEntry(cancelledSession, false));
-      clearActiveFocusSession();
+      const cancelledSession = cancelFocusSession({
+        session: activeFocusSession,
+        focusSecondsLeft,
+        storage: browserCompanionStorage,
+      });
 
       setFocusMode(false);
       setFocusSecondsLeft(FOCUS_DURATION_SECONDS);
@@ -753,19 +669,12 @@ export default function HomePage() {
       return;
     }
 
-    const trimmedLabel = focusTaskLabel.trim();
-
-    const session: FocusSession = {
-      id: crypto.randomUUID(),
-      taskLabel: trimmedLabel || undefined,
+    const session = startFocusSession({
       plannedMinutes: FOCUS_DURATION_MINUTES,
-      startTime: new Date().toISOString(),
-      elapsedSeconds: 0,
-      status: "running",
-      totalPausedSeconds: 0,
-    };
+      taskLabel: focusTaskLabel,
+      storage: browserCompanionStorage,
+    });
 
-    saveActiveFocusSession(session);
     setActiveFocusSession(session);
     setFocusMode(true);
     setFocusSecondsLeft(FOCUS_DURATION_SECONDS);
@@ -777,8 +686,8 @@ export default function HomePage() {
 
     setPet((current) => ({
       ...current,
-      currentDialogue: trimmedLabel
-        ? `focus mode activated for ${trimmedLabel}. i’m locked in with you ✨`
+      currentDialogue: session.taskLabel
+        ? `focus mode activated for ${session.taskLabel}. i’m locked in with you ✨`
         : "focus mode activated. one tiny step at a time ✨",
       lastUpdated: new Date().toISOString(),
     }));
@@ -791,6 +700,17 @@ export default function HomePage() {
     return "sleepy";
   }, [pet.happiness, pet.energy, focusMode]);
 
+  const historySubtitle =
+    recentFocusSessions.length > 0
+      ? `${recentFocusSessions.length} recent session${
+          recentFocusSessions.length === 1 ? "" : "s"
+        }`
+      : "No sessions yet";
+
+  const statsSubtitle = topLabel
+    ? `Top label: ${topLabel}`
+    : "No strong pattern yet";
+
   if (!isLoaded) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#0f1020] text-white">
@@ -802,10 +722,10 @@ export default function HomePage() {
   return (
     <main
       onPointerDown={markActivity}
-      className={`min-h-screen px-6 py-10 text-white transition-colors duration-500 ${
+      className={`min-h-screen px-3 py-4 text-white transition-colors duration-500 ${
         focusMode
           ? "bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.16),_transparent_35%),linear-gradient(180deg,_#0d1020_0%,_#15192a_100%)]"
-          : "bg-[radial-gradient(circle_at_top,_rgba(139,92,246,0.22),_transparent_35%),linear-gradient(180deg,_#0f1020_0%,_#17182d_100%)]"
+          : "bg-[radial-gradient(circle_at_top,_rgba(139,92,246,0.18),_transparent_35%),linear-gradient(180deg,_#0f1020_0%,_#17182d_100%)]"
       }`}
     >
       <AnimatePresence>
@@ -815,131 +735,130 @@ export default function HomePage() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -12, scale: 0.96 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="pointer-events-none fixed left-1/2 top-6 z-50 w-[min(92vw,420px)] -translate-x-1/2"
+            className="pointer-events-none fixed left-1/2 top-4 z-50 w-[min(92vw,320px)] -translate-x-1/2"
           >
             <div className="rounded-2xl border border-violet-300/20 bg-[#1a1730]/90 px-4 py-3 text-center shadow-2xl backdrop-blur-xl">
-              <p className="text-xs uppercase tracking-[0.2em] text-violet-200/60">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-violet-200/60">
                 Focus Complete
               </p>
-              <p className="mt-1 text-sm text-white">
-                ✨ wisp is proud of you ✨
-              </p>
+              <p className="mt-1 text-sm text-white">✨ wisp is proud of you ✨</p>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-xl items-center justify-center">
+      <div className="mx-auto max-w-[360px]">
         <section
-          className={`w-full rounded-[32px] border p-10 shadow-2xl backdrop-blur-xl transition-all duration-500 ${
+          className={`rounded-[28px] border px-4 py-4 shadow-2xl backdrop-blur-xl transition-all duration-500 ${
             focusMode
-              ? "border-violet-200/10 bg-white/4"
-              : "border-white/10 bg-white/5"
+              ? "border-violet-200/10 bg-white/[0.035]"
+              : "border-white/10 bg-white/[0.045]"
           }`}
         >
-          <div className="mb-6 text-center">
-            <p className="text-sm uppercase tracking-[0.25em] text-white/50">
+          <div className="text-center">
+            <p className="text-[10px] uppercase tracking-[0.26em] text-white/45">
               Pocket Ghost
             </p>
+
             <input
               value={pet.name}
               onChange={(e) =>
                 setPet((prev) => ({ ...prev, name: e.target.value }))
               }
-              className="mt-2 w-full bg-transparent text-center text-3xl font-semibold outline-none"
+              className="mt-2 w-full bg-transparent text-center text-2xl font-semibold outline-none"
             />
-            <p className="mt-2 text-sm text-white/60">
+
+            <p className="mt-1 text-xs text-white/55">
               your tiny spectral coding companion
             </p>
+
+            <div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-white/45">
+              <span>mood: {vibeText}</span>
+              <span>•</span>
+              <span>visits: {pet.visits}</span>
+            </div>
           </div>
 
           <div
-            className={`my-4 transition-opacity duration-300 ${
+            className={`mt-3 transition-opacity duration-300 ${
               focusMode && activeFocusSession?.status === "paused"
                 ? "opacity-70"
                 : "opacity-100"
             }`}
           >
-            <GhostPet
-              mood={pet.happiness}
-              energy={pet.energy}
-              reaction={reaction}
-              focusMode={focusMode}
-              focusPaused={activeFocusSession?.status === "paused"}
-            />
+            <div className="origin-top scale-[0.78]">
+              <GhostPet
+                mood={pet.happiness}
+                energy={pet.energy}
+                reaction={reaction}
+                focusMode={focusMode}
+                focusPaused={activeFocusSession?.status === "paused"}
+              />
+            </div>
           </div>
 
-          {focusMode && (
-            <div className="mb-4 rounded-2xl border border-violet-300/20 bg-violet-300/10 px-4 py-3 text-center">
-              <p className="text-xs uppercase tracking-[0.2em] text-violet-200/70">
-                {activeFocusSession?.status === "paused"
-                  ? "Focus Mode Paused"
-                  : "Focus Mode"}
-              </p>
-
-              {activeFocusSession?.taskLabel && (
-                <p className="mt-1 text-xs text-violet-100/70">
-                  working on: {activeFocusSession.taskLabel}
-                </p>
-              )}
-
-              <p className="mt-1 text-2xl font-semibold text-white">
-                {formatTime(focusSecondsLeft)}
-              </p>
-
-              {activeFocusSession && (
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() =>
-                      activeFocusSession.status === "paused"
-                        ? resumeFocusSession("manual")
-                        : pauseFocusSession("manual")
-                    }
-                    className="flex-1 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs text-white transition hover:bg-white/20"
-                  >
-                    {activeFocusSession.status === "paused" ? "Resume" : "Pause"}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="mt-6">
+          <div className="-mt-10">
             <DialogueBubble message={pet.currentDialogue} />
           </div>
 
-          <div className="mt-6 space-y-4">
-            <StatusBar label="Happiness" value={pet.happiness} />
-            <StatusBar label="Energy" value={pet.energy} />
+          <div className="mt-4 space-y-3">
+            <MiniStatusBar label="Happiness" value={pet.happiness} />
+            <MiniStatusBar label="Energy" value={pet.energy} />
           </div>
 
           <div
-            className={`mt-6 transition-opacity duration-300 ${
+            className={`mt-4 transition-opacity duration-300 ${
               focusMode ? "opacity-60" : "opacity-100"
             }`}
           >
             <ActionPanel onAction={handleAction} />
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 rounded-2xl border border-violet-300/15 bg-violet-300/[0.06] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-violet-200/60">
+                  {activeFocusSession?.status === "paused"
+                    ? "Focus Paused"
+                    : focusMode
+                    ? "Focus Mode"
+                    : "Ready to Focus"}
+                </p>
+
+                {focusMode && activeFocusSession?.taskLabel ? (
+                  <p className="mt-1 text-xs text-violet-100/75">
+                    {activeFocusSession.taskLabel}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-white/50">
+                    one task at a time, bestie
+                  </p>
+                )}
+              </div>
+
+              <p className="text-2xl font-semibold text-white">
+                {formatTime(focusSecondsLeft)}
+              </p>
+            </div>
+
             {!focusMode && (
-              <div className="mb-3">
+              <div className="mt-3">
                 <input
                   value={focusTaskLabel}
                   onChange={(e) => setFocusTaskLabel(e.target.value)}
                   maxLength={60}
-                  placeholder="optional focus label, like portfolio or bug fixes"
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/35 outline-none transition focus:border-violet-300/25 focus:bg-white/8"
+                  placeholder="focus label"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/30 outline-none transition focus:border-violet-300/25"
                 />
 
                 {suggestedLabels.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {suggestedLabels.map((label) => (
                       <button
                         key={label}
                         type="button"
                         onClick={() => setFocusTaskLabel(label)}
-                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white"
+                        className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/70 transition hover:bg-white/10 hover:text-white"
                       >
                         {label}
                       </button>
@@ -949,112 +868,202 @@ export default function HomePage() {
               </div>
             )}
 
-            <button
-              onClick={toggleFocusMode}
-              className={`w-full rounded-2xl border px-4 py-3 text-sm font-medium transition ${
-                focusMode
-                  ? "border-violet-300/30 bg-violet-300/20 text-white hover:bg-violet-300/25"
-                  : "border-white/10 bg-white/10 text-white hover:bg-white/20"
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={toggleFocusMode}
+                className={`flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
+                  focusMode
+                    ? "border-violet-300/30 bg-violet-300/20 text-white hover:bg-violet-300/25"
+                    : "border-white/10 bg-white/10 text-white hover:bg-white/20"
+                }`}
+              >
+                {focusMode ? "End" : "Start"}
+              </button>
+
+              {focusMode && activeFocusSession ? (
+                <button
+                  onClick={() =>
+                    activeFocusSession.status === "paused"
+                      ? handleResumeFocusSession("manual")
+                      : handlePauseFocusSession("manual")
+                  }
+                  className="rounded-xl border border-white/10 bg-white/10 px-3 py-2.5 text-sm text-white transition hover:bg-white/20"
+                >
+                  {activeFocusSession.status === "paused" ? "Resume" : "Pause"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <CompactStatChip label="Today" value={`${todayMinutes}m`} />
+            <CompactStatChip label="Sessions" value={todaySessions.length} />
+            <CompactStatChip label="Streak" value={streak} />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <SidebarSection
+              title="Today"
+              subtitle={`${todayMinutes} minutes across ${todaySessions.length} session${
+                todaySessions.length === 1 ? "" : "s"
               }`}
+              isOpen={todayOpen}
+              onToggle={() => setTodayOpen((current) => !current)}
             >
-              {focusMode ? "End Focus Mode" : "Start Focus Mode"}
-            </button>
+              <div className="grid grid-cols-2 gap-2">
+                <CompactStatChip label="Today Minutes" value={todayMinutes} />
+                <CompactStatChip
+                  label="Today Sessions"
+                  value={todaySessions.length}
+                />
+                <CompactStatChip label="Streak" value={streak} />
+                <CompactStatChip
+                  label="Saved Sessions"
+                  value={focusSessionCount}
+                />
+              </div>
+            </SidebarSection>
 
-            <FocusTodayCard
-              todayMinutes={todayMinutes}
-              todaySessions={todaySessions.length}
-              streak={streak}
-            />
+            <SidebarSection
+              title="History"
+              subtitle={historySubtitle}
+              isOpen={historyOpen}
+              onToggle={() => setHistoryOpen((current) => !current)}
+            >
+              {recentFocusSessions.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-4 text-sm text-white/55">
+                  no focus sessions yet. your ghost believes in your productivity arc ✨
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {recentFocusSessions.map((session) => {
+                    const completed = session.status === "completed";
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+                    return (
+                      <div
+                        key={session.id}
+                        className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-white">
+                              {getSessionTitle(session)}
+                            </p>
+                            <p className="mt-1 text-[11px] text-white/45">
+                              {formatSessionDate(session.endTime)}
+                            </p>
+                          </div>
+
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${
+                              completed
+                                ? "border border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+                                : "border border-rose-300/20 bg-rose-300/10 text-rose-100"
+                            }`}
+                          >
+                            {completed ? "Done" : "Stopped"}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between text-xs text-white/65">
+                          <span>{session.actualMinutes} min</span>
+                          <span>planned {session.plannedMinutes}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </SidebarSection>
+
+            <SidebarSection
+              title="Stats"
+              subtitle={statsSubtitle}
+              isOpen={statsOpen}
+              onToggle={() => setStatsOpen((current) => !current)}
+            >
+              <div className="grid grid-cols-2 gap-2">
+                <CompactStatChip
+                  label="Completion"
+                  value={`${completionRate}%`}
+                />
+                <CompactStatChip
+                  label="Longest"
+                  value={`${longestSessionMinutes}m`}
+                />
+                <CompactStatChip
+                  label="Task Types"
+                  value={minutesByLabel.length}
+                />
+                <CompactStatChip
+                  label="Focused Total"
+                  value={`${totalFocusedMinutes}m`}
+                />
+              </div>
+
+              <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-white/40">
                   Top Label
                 </p>
-                <p className="mt-1 text-sm text-white">
-                  {topLabel ?? "None yet"}
-                </p>
+                <p className="mt-1 text-sm text-white">{topLabel ?? "None yet"}</p>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-                  Completion Rate
-                </p>
-                <p className="mt-1 text-sm text-white">
-                  {completionRate}%
-                </p>
-              </div>
+              {minutesByLabel.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {minutesByLabel.slice(0, 4).map((item) => (
+                    <div
+                      key={item.label}
+                      className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                    >
+                      <span className="truncate text-white/80">{item.label}</span>
+                      <span className="shrink-0 text-white/55">
+                        {item.minutes}m · {item.sessions}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SidebarSection>
 
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-                  Longest Session
-                </p>
-                <p className="mt-1 text-sm text-white">
-                  {longestSessionMinutes} min
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-                  Task Types
-                </p>
-                <p className="mt-1 text-sm text-white">
-                  {minutesByLabel.length}
-                </p>
-              </div>
-            </div>
-
-            <FocusHistoryCard
-              totalSessions={focusSessionCount}
-              totalMinutes={totalFocusedMinutes}
-              recentSessions={recentFocusSessions}
-              topLabel={topLabel}
-              completionRate={completionRate}
-            />
-
-            <div className="mt-4">
+            <SidebarSection
+              title="Settings"
+              subtitle="reset and cleanup options"
+              isOpen={settingsOpen}
+              onToggle={() => setSettingsOpen((current) => !current)}
+            >
               <button
                 onClick={() => setShowResetOptions((current) => !current)}
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/75 transition hover:bg-white/10"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white/75 transition hover:bg-white/10"
               >
-                {showResetOptions ? "Hide Reset Options" : "Reset Options"}
+                {showResetOptions ? "Hide Reset Options" : "Show Reset Options"}
               </button>
 
               <AnimatePresence>
                 {showResetOptions && (
                   <motion.div
-                    initial={{ opacity: 0, y: 8 }}
+                    initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.2, ease: "easeOut" }}
-                    className="mt-3 grid gap-3"
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.18, ease: "easeOut" }}
+                    className="mt-3 grid gap-2"
                   >
                     <button
                       onClick={handleResetToday}
-                      className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100 transition hover:bg-amber-300/15"
+                      className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2.5 text-sm text-amber-100 transition hover:bg-amber-300/15"
                     >
                       Reset Today’s Focus Data
                     </button>
 
                     <button
                       onClick={handleResetAll}
-                      className="rounded-2xl border border-rose-300/20 bg-rose-300/10 px-4 py-3 text-sm text-rose-100 transition hover:bg-rose-300/15"
+                      className="rounded-xl border border-rose-300/20 bg-rose-300/10 px-3 py-2.5 text-sm text-rose-100 transition hover:bg-rose-300/15"
                     >
                       Reset All Data
                     </button>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </div>
-          </div>
-
-          <div className="mt-6 flex items-center justify-between text-xs text-white/50">
-            <span>mood: {vibeText}</span>
-            <span>visits: {pet.visits}</span>
-          </div>
-
-          <div className="mt-2 text-center text-xs text-white/35">
-            focus sessions saved: {focusSessionCount}
+            </SidebarSection>
           </div>
         </section>
       </div>
