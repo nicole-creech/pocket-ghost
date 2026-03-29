@@ -40,6 +40,7 @@ const FOCUS_DURATION_MINUTES = 25;
 const FOCUS_DURATION_SECONDS = FOCUS_DURATION_MINUTES * 60;
 const AUTO_PAUSE_AFTER_SECONDS = 5 * 60;
 const FOCUS_NUDGE_EVERY_SECONDS = 10 * 60;
+const AMBIENT_DIALOGUE_EVERY_MS = 20000;
 
 function clamp(value: number) {
   return Math.max(0, Math.min(100, value));
@@ -150,8 +151,14 @@ export default function HomePage() {
     return focusHistory.slice(0, 3);
   }, [focusHistory]);
 
-  const todaySessions = useMemo(() => getTodaySessions(focusHistory), [focusHistory]);
-  const todayMinutes = useMemo(() => getTodayMinutes(focusHistory), [focusHistory]);
+  const todaySessions = useMemo(
+    () => getTodaySessions(focusHistory),
+    [focusHistory]
+  );
+  const todayMinutes = useMemo(
+    () => getTodayMinutes(focusHistory),
+    [focusHistory]
+  );
   const streak = useMemo(() => getCurrentStreak(focusHistory), [focusHistory]);
 
   const triggerFocusCelebration = () => {
@@ -160,6 +167,15 @@ export default function HomePage() {
     window.setTimeout(() => {
       setShowFocusCelebration(false);
     }, 2200);
+  };
+
+  const triggerReaction = (nextReaction: string, duration = 900) => {
+    setReaction(nextReaction);
+    window.setTimeout(() => setReaction(null), duration);
+  };
+
+  const markActivity = () => {
+    setLastActivityAt(Date.now());
   };
 
   const pauseFocusSession = (reason: "manual" | "auto" = "manual") => {
@@ -177,19 +193,21 @@ export default function HomePage() {
       return updatedSession;
     });
 
+    triggerReaction("focus-pause", 950);
+
     if (reason === "auto") {
       setWasAutoPaused(true);
       setPet((current) => ({
         ...current,
         currentDialogue:
-          "you went quiet for a bit, so i paused for you. we can jump back in whenever you’re ready ✨",
+          "you went quiet for a bit, so i paused for you. we can hop back in whenever ✨",
         lastUpdated: new Date().toISOString(),
       }));
     } else {
       setWasAutoPaused(false);
       setPet((current) => ({
         ...current,
-        currentDialogue: "taking a little break? i’ll be right here 💜",
+        currentDialogue: "okay, little pause. i’ll keep your spot warm 💜",
         lastUpdated: new Date().toISOString(),
       }));
     }
@@ -220,6 +238,7 @@ export default function HomePage() {
       return updatedSession;
     });
 
+    triggerReaction("focus-resume", 900);
     setWasAutoPaused(false);
     setLastActivityAt(Date.now());
 
@@ -228,7 +247,7 @@ export default function HomePage() {
       currentDialogue:
         reason === "auto"
           ? "welcome back. i resumed focus mode for you ✨"
-          : "okay, back to it. nice and easy 💫",
+          : "back in it. nice and steady, bestie 💫",
       lastUpdated: new Date().toISOString(),
     }));
   };
@@ -273,16 +292,14 @@ export default function HomePage() {
           return {
             ...current,
             happiness: nextHappiness,
-            currentDialogue: getFocusAwareDialogue({
-              mood: nextHappiness,
-              energy: current.energy,
-              todayMinutes,
-              streak,
-            }),
+            currentDialogue: savedSession.taskLabel
+              ? `you did it — ${savedSession.taskLabel} is done for now. i’m so proud of you 💖`
+              : "focus session complete. look at you go, little legend ✨",
             lastUpdated: new Date().toISOString(),
           };
         });
 
+        triggerReaction("focus-complete", 1200);
         triggerFocusCelebration();
       } else {
         const restoredSession: FocusSession = {
@@ -309,7 +326,7 @@ export default function HomePage() {
     }
 
     setIsLoaded(true);
-  }, []);
+  }, [todayMinutes, streak]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -342,24 +359,26 @@ export default function HomePage() {
           energy: current.energy,
         }),
       }));
-    }, 20000);
+    }, AMBIENT_DIALOGUE_EVERY_MS);
 
     return () => clearInterval(interval);
   }, [isLoaded, focusMode]);
 
   useEffect(() => {
-    const markUserActivity = () => {
-      setLastActivityAt(Date.now());
+    const handleActivity = () => {
+      markActivity();
     };
 
-    window.addEventListener("mousemove", markUserActivity);
-    window.addEventListener("keydown", markUserActivity);
-    window.addEventListener("scroll", markUserActivity);
+    window.addEventListener("mousemove", handleActivity);
+    window.addEventListener("keydown", handleActivity);
+    window.addEventListener("scroll", handleActivity);
+    window.addEventListener("pointerdown", handleActivity);
 
     return () => {
-      window.removeEventListener("mousemove", markUserActivity);
-      window.removeEventListener("keydown", markUserActivity);
-      window.removeEventListener("scroll", markUserActivity);
+      window.removeEventListener("mousemove", handleActivity);
+      window.removeEventListener("keydown", handleActivity);
+      window.removeEventListener("scroll", handleActivity);
+      window.removeEventListener("pointerdown", handleActivity);
     };
   }, []);
 
@@ -372,7 +391,7 @@ export default function HomePage() {
     ) {
       resumeFocusSession("auto");
     }
-  }, [lastActivityAt]);
+  }, [lastActivityAt, focusMode, activeFocusSession, wasAutoPaused]);
 
   useEffect(() => {
     if (
@@ -392,7 +411,7 @@ export default function HomePage() {
     }, 15000);
 
     return () => window.clearInterval(interval);
-  }, [focusMode, activeFocusSession?.status, lastActivityAt, focusSecondsLeft]);
+  }, [focusMode, activeFocusSession, lastActivityAt, focusSecondsLeft]);
 
   useEffect(() => {
     if (
@@ -431,16 +450,14 @@ export default function HomePage() {
           return {
             ...current,
             happiness: nextHappiness,
-            currentDialogue: getFocusAwareDialogue({
-              mood: nextHappiness,
-              energy: current.energy,
-              todayMinutes,
-              streak,
-            }),
+            currentDialogue: activeFocusSession.taskLabel
+              ? `you did it — ${activeFocusSession.taskLabel} is done for now. i’m so proud of you 💖`
+              : "focus session complete. look at you go, little legend ✨",
             lastUpdated: new Date().toISOString(),
           };
         });
 
+        triggerReaction("focus-complete", 1200);
         triggerFocusCelebration();
         return;
       }
@@ -478,8 +495,10 @@ export default function HomePage() {
   const handleAction = (action: InteractionType) => {
     if (focusMode) return;
 
+    markActivity();
+
     setReaction(action);
-    setTimeout(() => setReaction(null), 700);
+    window.setTimeout(() => setReaction(null), 700);
 
     setPet((current) => {
       let happinessBoost = 0;
@@ -565,6 +584,8 @@ export default function HomePage() {
   };
 
   const toggleFocusMode = () => {
+    markActivity();
+
     if (focusMode && activeFocusSession) {
       const cancelledSession: FocusSession = {
         ...activeFocusSession,
@@ -616,14 +637,13 @@ export default function HomePage() {
     setLastNudgeBucket(0);
     setLastActivityAt(Date.now());
 
+    triggerReaction("focus-start", 1000);
+
     setPet((current) => ({
       ...current,
-      currentDialogue: getFocusAwareDialogue({
-        mood: current.happiness,
-        energy: current.energy,
-        todayMinutes,
-        streak,
-      }),
+      currentDialogue: trimmedLabel
+        ? `focus mode activated for ${trimmedLabel}. i’m locked in with you ✨`
+        : "focus mode activated. one tiny step at a time ✨",
       lastUpdated: new Date().toISOString(),
     }));
   };
@@ -645,6 +665,7 @@ export default function HomePage() {
 
   return (
     <main
+      onPointerDown={markActivity}
       className={`min-h-screen px-6 py-10 text-white transition-colors duration-500 ${
         focusMode
           ? "bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.16),_transparent_35%),linear-gradient(180deg,_#0d1020_0%,_#15192a_100%)]"

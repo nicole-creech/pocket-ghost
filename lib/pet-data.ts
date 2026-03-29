@@ -244,3 +244,24 @@ export function getFocusAwareDialogue({
   // fallback
   return random(FOCUS_DIALOGUE);
 }
+
+export const IDLE_LINES = [
+  "just floating around and cheering you on",
+  "tiny ghost quality check: shoulders relaxed?",
+  "you’re doing better than you think",
+  "hydrate check, little coder",
+];
+
+export const SLEEPY_LINES = [
+  "i got a little eepy waiting here...",
+  "we can go gentle, no pressure",
+  "maybe a stretch break soon?",
+  "ghost says blink your human eyes too",
+];
+
+export const FOCUS_LINES = [
+  "laser focus mode activated",
+  "one task at a time, we got this",
+  "tiny ghost believes in this session",
+  "you code, i haunt productively",
+];

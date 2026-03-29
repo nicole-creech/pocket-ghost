@@ -42,3 +42,18 @@ export interface FocusSessionHistoryEntry {
   endTime: string;
   completed: boolean;
 }
+
+export type GhostMood =
+  | "idle"
+  | "happy"
+  | "sleepy"
+  | "focus"
+  | "reacting";
+
+export type GhostEmote =
+  | "zzz"
+  | "heart"
+  | "sparkle"
+  | "dotdotdot"
+  | "star"
+  | null;
