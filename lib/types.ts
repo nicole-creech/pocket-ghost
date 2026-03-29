@@ -50,6 +50,27 @@ export interface FocusLabelStat {
   sessions: number;
 }
 
+export interface ContextualDialogueParams {
+  mood: number;
+  energy: number;
+  action?: InteractionType;
+}
+
+export interface FocusAwareDialogueParams {
+  mood: number;
+  energy: number;
+  todayMinutes: number;
+  streak: number;
+}
+
+export interface StatsAwareDialogueParams {
+  topLabel: string | null;
+  completionRate: number;
+  todaySessions: number;
+  streak: number;
+  todayMinutes: number;
+}
+
 export type GhostMood =
   | "idle"
   | "happy"

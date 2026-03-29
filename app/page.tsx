@@ -10,8 +10,11 @@ import FocusHistoryCard from "@/components/FocusHistoryCard";
 import FocusTodayCard from "@/components/FocusTodayCard";
 import {
   DEFAULT_PET,
+  getCancelledFocusDialogue,
   getContextualDialogue,
-  getFocusAwareDialogue,
+  getFocusCompleteDialogue,
+  getStatsAwareDialogue,
+  getWelcomeBackDialogue,
 } from "@/lib/pet-data";
 import {
   addFocusSessionHistoryEntry,
@@ -193,46 +196,29 @@ function getMinutesByLabel(history: FocusSessionHistoryEntry[]) {
   return Array.from(labelMap.values()).sort((a, b) => b.minutes - a.minutes);
 }
 
-function getStatsAwareDialogue({
-  topLabel,
-  completionRate,
-  todaySessions,
-}: {
-  topLabel: string | null;
-  completionRate: number;
-  todaySessions: number;
-}) {
-  if (todaySessions >= 4) {
-    return "you’ve been really steady today. i’m very proud of you 💜";
-  }
-
-  if (completionRate >= 80) {
-    return "you’ve been finishing what you start lately. that’s huge ✨";
-  }
-
-  if (topLabel && topLabel !== "Unlabeled") {
-    return `you and i have been spending a lot of time on ${topLabel} lately 👻`;
-  }
-
-  return null;
-}
-
 export default function HomePage() {
+  // pet/app state
   const [pet, setPet] = useState<Pet>(DEFAULT_PET);
   const [isLoaded, setIsLoaded] = useState(false);
   const [reaction, setReaction] = useState<string | null>(null);
 
+  // focus session state
   const [focusMode, setFocusMode] = useState(false);
-  const [focusSecondsLeft, setFocusSecondsLeft] =
-    useState(FOCUS_DURATION_SECONDS);
+  const [focusSecondsLeft, setFocusSecondsLeft] = useState(
+    FOCUS_DURATION_SECONDS
+  );
   const [activeFocusSession, setActiveFocusSession] =
     useState<FocusSession | null>(null);
   const [focusSessionCount, setFocusSessionCount] = useState(0);
+  const [focusTaskLabel, setFocusTaskLabel] = useState("");
+
+  // ui state
   const [showFocusCelebration, setShowFocusCelebration] = useState(false);
   const [showResetOptions, setShowResetOptions] = useState(false);
 
-  const [focusTaskLabel, setFocusTaskLabel] = useState("");
-  const [lastActivityAt, setLastActivityAt] = useState(Date.now());
+  // timing/behavior helpers
+  const [lastActivityAt, setLastActivityAt] = useState(() => Date.now());
+  const [lastReturnAt, setLastReturnAt] = useState(() => 0);
   const [wasAutoPaused, setWasAutoPaused] = useState(false);
   const [lastNudgeBucket, setLastNudgeBucket] = useState(0);
 
@@ -300,7 +286,24 @@ export default function HomePage() {
   };
 
   const markActivity = () => {
-    setLastActivityAt(Date.now());
+    const now = Date.now();
+    const inactiveFor = now - lastActivityAt;
+
+    if (
+      !focusMode &&
+      inactiveFor > 1000 * 60 * 12 &&
+      now - lastReturnAt > 1000 * 60 * 3
+    ) {
+      setPet((current) => ({
+        ...current,
+        currentDialogue: getWelcomeBackDialogue(),
+        lastUpdated: new Date().toISOString(),
+      }));
+
+      setLastReturnAt(now);
+    }
+
+    setLastActivityAt(now);
   };
 
   const pauseFocusSession = (reason: "manual" | "auto" = "manual") => {
@@ -417,9 +420,7 @@ export default function HomePage() {
           return {
             ...current,
             happiness: nextHappiness,
-            currentDialogue: savedSession.taskLabel
-              ? `you did it — ${savedSession.taskLabel} is done for now. i’m so proud of you 💖`
-              : "focus session complete. look at you go, little legend ✨",
+            currentDialogue: getFocusCompleteDialogue(savedSession.taskLabel),
             lastUpdated: new Date().toISOString(),
           };
         });
@@ -482,6 +483,8 @@ export default function HomePage() {
           topLabel,
           completionRate,
           todaySessions: todaySessions.length,
+          streak,
+          todayMinutes,
         });
 
         const nextDialogue =
@@ -500,7 +503,15 @@ export default function HomePage() {
     }, AMBIENT_DIALOGUE_EVERY_MS);
 
     return () => clearInterval(interval);
-  }, [isLoaded, focusMode, topLabel, completionRate, todaySessions.length]);
+  }, [
+    isLoaded,
+    focusMode,
+    topLabel,
+    completionRate,
+    todaySessions.length,
+    streak,
+    todayMinutes,
+  ]);
 
   useEffect(() => {
     const handleActivity = () => {
@@ -588,9 +599,9 @@ export default function HomePage() {
           return {
             ...current,
             happiness: nextHappiness,
-            currentDialogue: activeFocusSession.taskLabel
-              ? `you did it — ${activeFocusSession.taskLabel} is done for now. i’m so proud of you 💖`
-              : "focus session complete. look at you go, little legend ✨",
+            currentDialogue: getFocusCompleteDialogue(
+              activeFocusSession.taskLabel
+            ),
             lastUpdated: new Date().toISOString(),
           };
         });
@@ -618,11 +629,7 @@ export default function HomePage() {
     const timer = window.setInterval(tick, 1000);
 
     return () => window.clearInterval(timer);
-  }, [
-    focusMode,
-    activeFocusSession,
-    lastNudgeBucket,
-  ]);
+  }, [focusMode, activeFocusSession, lastNudgeBucket]);
 
   const handleAction = (action: InteractionType) => {
     if (focusMode) return;
@@ -739,10 +746,7 @@ export default function HomePage() {
 
       setPet((current) => ({
         ...current,
-        currentDialogue: getContextualDialogue({
-          mood: current.happiness,
-          energy: current.energy,
-        }),
+        currentDialogue: getCancelledFocusDialogue(cancelledSession.taskLabel),
         lastUpdated: new Date().toISOString(),
       }));
 
