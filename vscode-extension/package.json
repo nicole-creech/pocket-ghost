@@ -4,11 +4,26 @@
   "description": "A tiny spectral coding companion for focus sessions and gentle morale support.",
   "version": "0.0.1",
   "publisher": "nicole-creech",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicole-creech/pocket-ghost"
+  },
+  "homepage": "https://github.com/nicole-creech/pocket-ghost",
+  "bugs": {
+    "url": "https://github.com/nicole-creech/pocket-ghost/issues"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "productivity",
+    "focus",
+    "companion",
+    "pomodoro",
+    "cute"
   ],
   "activationEvents": [
     "onView:pocketGhost.sidebar",
