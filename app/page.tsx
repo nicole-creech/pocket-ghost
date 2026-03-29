@@ -1,65 +1,180 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+import { useEffect, useMemo, useState } from "react";
+import ActionPanel from "@/components/ActionPanel";
+import DialogueBubble from "@/components/DialogueBubble";
+import GhostPet from "@/components/GhostPet";
+import StatusBar from "@/components/StatusBar";
+import { DEFAULT_PET, getRandomDialogue } from "@/lib/pet-data";
+import { loadPet, savePet } from "@/lib/storage";
+import { InteractionType, Pet } from "@/lib/types";
+
+function clamp(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function applyLightDecay(pet: Pet): Pet {
+  const now = new Date();
+  const lastUpdated = new Date(pet.lastUpdated);
+  const diffMs = now.getTime() - lastUpdated.getTime();
+  const hoursPassed = Math.floor(diffMs / (1000 * 60 * 60));
+
+  if (hoursPassed <= 0) return pet;
+
+  return {
+    ...pet,
+    happiness: clamp(pet.happiness - hoursPassed * 2),
+    energy: clamp(pet.energy - hoursPassed * 3),
+    lastUpdated: now.toISOString(),
+  };
+}
+
+export default function HomePage() {
+  const [pet, setPet] = useState<Pet>(DEFAULT_PET);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [reaction, setReaction] = useState<string | null>(null);
+
+  useEffect(() => {
+    const savedPet = loadPet();
+
+    if (savedPet) {
+      const updatedPet = applyLightDecay({
+        ...savedPet,
+        visits: (savedPet.visits ?? 0) + 1,
+      });
+      setPet(updatedPet);
+      savePet(updatedPet);
+    } else {
+      savePet(DEFAULT_PET);
+    }
+
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    savePet(pet);
+  }, [pet, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    const interval = setInterval(() => {
+      setPet((current) => ({
+        ...current,
+        happiness: clamp(current.happiness - 1),
+        energy: clamp(current.energy - 1),
+        lastUpdated: new Date().toISOString(),
+      }));
+    }, 45000);
+
+    return () => clearInterval(interval);
+  }, [isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    const interval = setInterval(() => {
+      setPet((current) => ({
+        ...current,
+        currentDialogue: getRandomDialogue(),
+      }));
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, [isLoaded]);
+
+  const handleAction = (action: InteractionType) => {
+    setReaction(action);
+    setTimeout(() => setReaction(null), 700);
+
+    setPet((current) => {
+      let happinessBoost = 0;
+      let energyBoost = 0;
+
+      switch (action) {
+        case "pet":
+          happinessBoost = 8;
+          energyBoost = -2;
+          break;
+        case "feed":
+          happinessBoost = 4;
+          energyBoost = 10;
+          break;
+        case "play":
+          happinessBoost = 12;
+          energyBoost = -8;
+          break;
+      }
+
+      return {
+        ...current,
+        happiness: clamp(current.happiness + happinessBoost),
+        energy: clamp(current.energy + energyBoost),
+        lastInteraction: action,
+        currentDialogue: getRandomDialogue(action),
+        lastUpdated: new Date().toISOString(),
+      };
+    });
+  };
+
+  const vibeText = useMemo(() => {
+    if (pet.happiness >= 75 && pet.energy >= 60) return "thriving";
+    if (pet.happiness >= 45 && pet.energy >= 35) return "cozy";
+    return "sleepy";
+  }, [pet.happiness, pet.energy]);
+
+  if (!isLoaded) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#0f1020] text-white">
+        <p className="text-sm text-white/70">summoning your ghost...</p>
       </main>
-    </div>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(139,92,246,0.22),_transparent_35%),linear-gradient(180deg,_#0f1020_0%,_#17182d_100%)] px-6 py-10 text-white">
+      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-xl items-center justify-center">
+        <section className="w-full rounded-[32px] border border-white/10 bg-white/5 p-10 shadow-2xl backdrop-blur-xl">
+          <div className="mb-6 text-center">
+            <p className="text-sm uppercase tracking-[0.25em] text-white/50">
+              Pocket Ghost
+            </p>
+            <input
+              value={pet.name}
+              onChange={(e) =>
+                setPet((prev) => ({ ...prev, name: e.target.value }))
+              }
+              className="mt-2 w-full bg-transparent text-center text-3xl font-semibold outline-none"
+            />
+            <p className="mt-2 text-sm text-white/60">
+              your tiny spectral coding companion
+            </p>
+          </div>
+
+          <div className="my-4">
+            <GhostPet mood={pet.happiness} reaction={reaction} />
+          </div>
+
+          <div className="mt-6">
+            <DialogueBubble message={pet.currentDialogue} />
+          </div>
+
+          <div className="mt-6 space-y-4">
+            <StatusBar label="Happiness" value={pet.happiness} />
+            <StatusBar label="Energy" value={pet.energy} />
+          </div>
+
+          <div className="mt-6">
+            <ActionPanel onAction={handleAction} />
+          </div>
+
+          <div className="mt-6 flex items-center justify-between text-xs text-white/50">
+            <span>mood: {vibeText}</span>
+            <span>visits: {pet.visits}</span>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
