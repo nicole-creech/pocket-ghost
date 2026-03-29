@@ -1,30 +1,11 @@
-import { FocusSession, FocusSessionHistoryEntry, Pet } from "./types";
+import { FocusSession, FocusSessionHistoryEntry } from "./types";
 
-const PET_STORAGE_KEY = "pocket-ghost-save";
 const ACTIVE_SESSION_KEY = "wisp.activeFocusSession";
 const SESSION_HISTORY_KEY = "wisp.focusSessionHistory";
 const MAX_HISTORY_ENTRIES = 100;
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
-}
-
-export function savePet(pet: Pet) {
-  if (!isBrowser()) return;
-  window.localStorage.setItem(PET_STORAGE_KEY, JSON.stringify(pet));
-}
-
-export function loadPet(): Pet | null {
-  if (!isBrowser()) return null;
-
-  const saved = window.localStorage.getItem(PET_STORAGE_KEY);
-  if (!saved) return null;
-
-  try {
-    return JSON.parse(saved) as Pet;
-  } catch {
-    return null;
-  }
 }
 
 export function getActiveFocusSession(): FocusSession | null {
@@ -77,7 +58,7 @@ export function getFocusSessionHistory(): FocusSessionHistoryEntry[] {
 }
 
 export function saveFocusSessionHistory(
-  history: FocusSessionHistoryEntry[]
+  history: FocusSessionHistoryEntry[],
 ): void {
   if (!isBrowser()) return;
 
@@ -85,7 +66,7 @@ export function saveFocusSessionHistory(
     const trimmedHistory = history.slice(0, MAX_HISTORY_ENTRIES);
     window.localStorage.setItem(
       SESSION_HISTORY_KEY,
-      JSON.stringify(trimmedHistory)
+      JSON.stringify(trimmedHistory),
     );
   } catch (error) {
     console.error("Failed to save focus session history", error);
@@ -93,59 +74,13 @@ export function saveFocusSessionHistory(
 }
 
 export function addFocusSessionHistoryEntry(
-  entry: FocusSessionHistoryEntry
+  entry: FocusSessionHistoryEntry,
 ): void {
   const existingHistory = getFocusSessionHistory();
   const updatedHistory = [entry, ...existingHistory].slice(
     0,
-    MAX_HISTORY_ENTRIES
+    MAX_HISTORY_ENTRIES,
   );
 
   saveFocusSessionHistory(updatedHistory);
-}
-export function clearFocusSessionHistory(): void {
-  if (!isBrowser()) return;
-
-  try {
-    window.localStorage.removeItem(SESSION_HISTORY_KEY);
-  } catch (error) {
-    console.error("Failed to clear focus session history", error);
-  }
-}
-
-export function resetTodayFocusData(): void {
-  if (!isBrowser()) return;
-
-  try {
-    const history = getFocusSessionHistory();
-    const today = new Date();
-
-    const filteredHistory = history.filter((session) => {
-      const endDate = new Date(session.endTime);
-
-      const isToday =
-        endDate.getFullYear() === today.getFullYear() &&
-        endDate.getMonth() === today.getMonth() &&
-        endDate.getDate() === today.getDate();
-
-      return !isToday;
-    });
-
-    saveFocusSessionHistory(filteredHistory);
-    clearActiveFocusSession();
-  } catch (error) {
-    console.error("Failed to reset today's focus data", error);
-  }
-}
-
-export function resetAllAppData(): void {
-  if (!isBrowser()) return;
-
-  try {
-    window.localStorage.removeItem(PET_STORAGE_KEY);
-    window.localStorage.removeItem(ACTIVE_SESSION_KEY);
-    window.localStorage.removeItem(SESSION_HISTORY_KEY);
-  } catch (error) {
-    console.error("Failed to reset all app data", error);
-  }
 }

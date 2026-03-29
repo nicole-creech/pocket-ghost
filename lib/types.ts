@@ -13,3 +13,32 @@ export type Pet = {
   lastInteraction?: InteractionType;
   currentDialogue: string;
 };
+
+export type FocusSessionStatus =
+  | "idle"
+  | "running"
+  | "paused"
+  | "completed"
+  | "cancelled";
+
+export interface FocusSession {
+  id: string;
+  taskLabel?: string;
+  plannedMinutes: number;
+  startTime: string;
+  endTime?: string;
+  elapsedSeconds: number;
+  status: FocusSessionStatus;
+  pausedAt?: string;
+  totalPausedSeconds?: number;
+}
+
+export interface FocusSessionHistoryEntry {
+  id: string;
+  taskLabel?: string;
+  plannedMinutes: number;
+  actualMinutes: number;
+  startTime: string;
+  endTime: string;
+  completed: boolean;
+}
