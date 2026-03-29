@@ -1,0 +1,51 @@
+{
+  "name": "pocket-ghost",
+  "displayName": "Pocket Ghost",
+  "description": "A tiny spectral coding companion for focus sessions and gentle morale support.",
+  "version": "0.0.1",
+  "publisher": "nicole-creech",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:pocketGhost.sidebar",
+    "onCommand:pocketGhost.openSidebar",
+    "onCommand:pocketGhost.resetAllData"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "pocketGhost.sidebar",
+          "name": "Pocket Ghost"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "pocketGhost.openSidebar",
+        "title": "Pocket Ghost: Focus Explorer View"
+      },
+      {
+        "command": "pocketGhost.resetAllData",
+        "title": "Pocket Ghost: Reset All Data"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/node": "^20.14.10",
+    "@vscode/vsce": "^3.2.2",
+    "typescript": "^5.5.4"
+  }
+}
